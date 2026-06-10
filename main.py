@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
 import random
-
+import requests
+from parser import parse_taxcore_receipt, parse_number
 
 app = FastAPI()
 
@@ -41,21 +42,31 @@ async def get_current_user(authorization: str = Header(None)):
     user = res.json()
     return {"uid": user["id"], "email": user.get("email")}
 
+
 @app.post("/parse-receipt")
 async def parse_receipt(data: ScanRequest, user=Depends(get_current_user)):
-    rnd = random.randint(1, 100)
-    rndPrice = random.randint(180, 220)
-    return {
-        "status": "success",
-        "user_id": user["uid"],
-        "station": "NIS Petrol – Bulevar",
-        "fuel_type": "Euro Premium BMB 95",
-        "liters": rnd,
-        "price_per_l": rndPrice,
-        "total": rnd * rndPrice,
-        "date": "2026-06-09T14:23:00",
-        "raw_url": data.url,
-    }
+
+    try:
+        receipt = parse_taxcore_receipt(data.url)
+        ret = {
+            "status": "success",
+            "user_id": user["uid"],
+            "station": None,
+            "fuel_type": None,
+            "liters": None,
+            "price_per_l": None,
+            "total": parse_number(receipt["total"].strip()),
+            "date": receipt["date"],
+            "invoice_number": receipt["invoice_number"],
+            "items": receipt["items"],
+            "raw_url": data.url
+        }
+        print(ret)
+        return ret
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
 
