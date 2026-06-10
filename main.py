@@ -45,22 +45,51 @@ async def get_current_user(authorization: str = Header(None)):
 
 @app.post("/parse-receipt")
 async def parse_receipt(data: ScanRequest, user=Depends(get_current_user)):
-
     try:
-        receipt = parse_taxcore_receipt(data.url)
+        # 1. Pokrećemo parser koji izvlači sve sirove podatke
+        receipt = await parse_taxcore_receipt(data.url)
+        print("Recipt:", receipt)
+
+        station = receipt.get("station", "Nepoznata pumpa")
+        fuel_type = None
+        liters = None
+        price_per_l = None
+        total_raw = None
+
+            # 4. KLJUČNI DEO: Prolazimo kroz artikle i tražimo gorivo
+        # Tražimo ključne reči kao što su DIZEL, BMB, EVRO PREMIJUM, GAS, G-DRIVE...
+        fuel_keywords = ["DIZEL", "BMB", "GAS", "TNG", "BENZIN", "PREMIUM", "DRIVE", "OPTIPUR"]
+
+
+        print("Printing intems:")
+        for item in receipt["items"]:
+            item_name_upper = item["name"].upper()
+            print("Item name: ",item_name_upper)
+            # Ako naziv artikla sadrži neku od ključnih reči za gorivo
+            if any(keyword in item_name_upper for keyword in fuel_keywords):
+                fuel_type = item["name"].strip()  # npr. "ART ENERGY DIZEL, 2710194400"
+                liters = item["quantity"]  # sa tvoje slike: 8.55
+                price_per_l = item["unit_price"]  # sa tvoje slike: 233.90
+                total_raw = item["total"]
+                break  # Prekidamo petlju čim nađemo glavno gorivo (ignorišemo ako je kupio i osveživač ili kafu)
+
+
+        total_parsed = parse_number(total_raw) if total_raw else None
+
+        # 6. Pakovanje čistog objekta za frontend
         ret = {
             "status": "success",
             "user_id": user["uid"],
-            "station": None,
-            "fuel_type": None,
-            "liters": None,
-            "price_per_l": None,
-            "total": parse_number(receipt["total"].strip()),
+            "station": station,
+            "fuel_type": fuel_type,
+            "liters": liters,
+            "price_per_l": price_per_l,
+            "total": total_parsed,
             "date": receipt["date"],
             "invoice_number": receipt["invoice_number"],
-            "items": receipt["items"],
             "raw_url": data.url
         }
+
         print(ret)
         return ret
 
