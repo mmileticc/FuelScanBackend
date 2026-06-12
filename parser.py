@@ -20,26 +20,44 @@ def parse_number(val):
     except ValueError:
         return None
 
+
 async def parse_taxcore_receipt(url: str):
     invoice_number = None
     date_time = None
     total_amount = None
+    station = "Nepoznata pumpa"
     items = []
 
-    # Pokrećemo Playwright asinhrono
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        # Dodajemo standardni User-Agent da nas server ne bi blokirao
+        # Dodajemo argumente za smanjenje potrošnje memorije u Dockeru
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",  # Ključno za Docker kontejnere sa malo RAM-a
+                "--disable-accelerated-2d-canvas",
+                "--disable-gpu"
+            ]
+        )
+
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
 
+        # OPTIMIZACIJA: Blokiramo slike, fontove i CSS da uštedimo protok i vreme
+        await page.route("**/*", lambda route, request:
+        route.abort() if request.resource_type in ["image", "media", "font", "stylesheet"]
+        else route.continue_()
+                         )
+
         try:
             print(f"➡️ Otvaram račun: {url}")
-            await page.goto(url, wait_until="networkidle")
+            # Smanjujemo timeout na 20 sekundi da ruter ne bi čekao večno ako pukne veza
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
 
-            # --- 1. VADJENJE META PODATAKA (iz HTML-a) ---
+            # --- 1. VADJENJE META PODATAKA ---
             html = await page.content()
 
             inv_match = re.search(r"([A-Z0-9]{8}-[A-Z0-9]{8}-\d+)", html)
@@ -56,11 +74,11 @@ async def parse_taxcore_receipt(url: str):
 
             # --- 1.5. VADJENJE IMENA PRODAJNOG MESTA ---
             try:
-                # Primarno: Gađamo element po ID-u koji TaxCore koristi
-                if await page.locator('#shopFullNameLabel').count() > 0:
-                    station = await page.locator('#shopFullNameLabel').inner_text()
+                # Koristimo kraći timeout za pojedinačne elemente
+                shop_label = page.locator('#shopFullNameLabel')
+                if await shop_label.count() > 0:
+                    station = await shop_label.inner_text()
                 else:
-                    # Fallback: Nađemo labelu po tekstu i uzmemo prvi sledeći DOM element
                     label = page.locator('text="Име продајног места"').first
                     if await label.count() > 0:
                         station = await label.evaluate(
@@ -68,33 +86,23 @@ async def parse_taxcore_receipt(url: str):
             except Exception as e:
                 print(f"⚠️ Nije pronađeno ime prodajnog mesta: {e}")
 
-            # Čistimo prazna mesta i nove redove
             station = station.strip() if station else "Nepoznata pumpa"
 
             # --- 2. KLIK NA SPECIFIKACIJU I VADJENJE ARTIKALA ---
-            print("➡️ Tražim panel 'Спецификација рачуна'...")
-
-            # CSS Selektor za link koji otvara panel (sa tvoje slike: href="#collapse-specs")
             collapse_link_selector = 'a[href="#collapse-specs"]'
 
             if await page.locator(collapse_link_selector).count() > 0:
-                print("➡️ Klikćem na panel da se učitaju artikli...")
-                # Kliknemo da se tabela pojavi i trigerujemo učitavanje
                 await page.click(collapse_link_selector)
 
-                # KLJUČNO: Čekamo da se pojave redovi (tr) unutar tbody u specifikaciji.
-                # Ovo garantuje da je JS odradio svoj posao i povukao podatke.
-                await page.wait_for_selector('#collapse-specs tbody tr', timeout=10000)
+                # Čekamo samo tabelu, smanjen timeout na 5 sekundi jer je DOM već tu
+                await page.wait_for_selector('#collapse-specs tbody tr', timeout=5000)
 
-                # Uzimamo sve redove iz tabele
                 rows = await page.locator('#collapse-specs tbody tr').all()
-                print(f"➡️ Pronađeno {len(rows)} artikala. Izvlačim podatke...")
 
                 for row in rows:
-                    # Izvlačimo sve kolone (td) u tom redu
                     cols = await row.locator('td').all()
-
                     if len(cols) >= 7:
+                        # Brže uzimanje teksta direktno preko evaluate ili inner_text
                         name = await cols[0].inner_text()
                         quantity = await cols[1].inner_text()
                         unit_price = await cols[2].inner_text()
@@ -113,12 +121,13 @@ async def parse_taxcore_receipt(url: str):
                             "label": label.strip()
                         })
             else:
-                print("⚠️ Nije pronađeno dugme '#collapse-specs'. Moguće da je struktura drugačija.")
+                print("⚠️ Nije pronađeno dugme '#collapse-specs'.")
 
         except Exception as e:
             print(f"❌ Greška u Playwright parseru: {e}")
         finally:
-            # Obavezno zatvaramo browser na kraju kako ne bismo napravili memory leak
+            # Eksplicitno zatvaranje klijenta i browsera
+            await context.close()
             await browser.close()
 
     return {

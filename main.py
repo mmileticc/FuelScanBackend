@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -15,8 +16,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SUPABASE_URL = "https://jybatqpvokssutompyto.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5YmF0cXB2b2tzc3V0b21weXRvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMTUwMjIsImV4cCI6MjA5NjU5MTAyMn0.W-zZN3dLJDn18m3qoL0EP8s4g2K32vFO7tyIWD-oN_Q"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://jybatqpvokssutompyto.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
+
+if not SUPABASE_ANON_KEY:
+    print("❌ UPOZORENJE: SUPABASE_ANON_KEY nije podešen u environment promenljivim!")
 
 class ScanRequest(BaseModel):
     url: str
