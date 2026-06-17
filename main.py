@@ -55,6 +55,11 @@ async def parse_receipt(data: ScanRequest, user=Depends(get_current_user)):
         print("Recipt:", receipt)
 
         station = receipt.get("station", "Nepoznata pumpa")
+
+        address = receipt.get("address")
+        city = receipt.get("city")
+        municipality = receipt.get("municipality")
+
         fuel_type = None
         liters = None
         price_per_l = None
@@ -69,13 +74,12 @@ async def parse_receipt(data: ScanRequest, user=Depends(get_current_user)):
         for item in receipt["items"]:
             item_name_upper = item["name"].upper()
             print("Item name: ",item_name_upper)
-            # Ako naziv artikla sadrži neku od ključnih reči za gorivo
             if any(keyword in item_name_upper for keyword in fuel_keywords):
-                fuel_type = item["name"].strip()  # npr. "ART ENERGY DIZEL, 2710194400"
-                liters = item["quantity"]  # sa tvoje slike: 8.55
-                price_per_l = item["unit_price"]  # sa tvoje slike: 233.90
+                fuel_type = item["name"].strip()
+                liters = item["quantity"]
+                price_per_l = item["unit_price"]
                 total_raw = item["total"]
-                break  # Prekidamo petlju čim nađemo glavno gorivo (ignorišemo ako je kupio i osveživač ili kafu)
+                break
 
 
         total_parsed = parse_number(total_raw) if total_raw else None
@@ -85,6 +89,9 @@ async def parse_receipt(data: ScanRequest, user=Depends(get_current_user)):
             "status": "success",
             "user_id": user["uid"],
             "station": station,
+            "address": address,
+            "city": city,
+            "municipality": municipality,
             "fuel_type": fuel_type,
             "liters": liters,
             "price_per_l": price_per_l,
